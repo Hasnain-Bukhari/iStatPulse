@@ -13,23 +13,530 @@ struct PopoverContentView: View {
     @StateObject private var viewModel = PopoverViewModel()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            header
-            if let metrics = viewModel.metrics {
-                globalSummaryBar(metrics)
-                metricsSections(metrics)
-            } else {
-                ProgressView("Loading…")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 14) {
+                header
+                if let metrics = viewModel.metrics {
+                    globalSummaryBar(metrics)
+                    heroSection(metrics)
+                    gpuSectionWithHeader(metrics.gpu)
+                    pressureMemoryBatteryGrid(metrics)
+                    peCoresRow(metrics.cpu)
+                    diskRow(metrics.disk)
+                    cpuSectionWithDualGraph(metrics.cpu)
+                    if let gpu = metrics.gpu {
+                        gpuRow(gpu, graphSamples: viewModel.sampleBuffers.gpu.samples)
+                    }
+                    diskIOSection(metrics.disk)
+                    if let network = metrics.network {
+                        networkSectionWithDualGraph(network)
+                    }
+                    if let network = metrics.network {
+                        pingBlock(network)
+                        publicIPBlock(network)
+                    }
+                    if let battery = metrics.battery {
+                        batteryBar(battery)
+                    }
+                    if let sensors = metrics.sensors, (!sensors.thermals.isEmpty || !sensors.fans.isEmpty) {
+                        sensorsRow(sensors)
+                    }
+                    bottomNav
+                } else {
+                    ProgressView("Loading…")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 40)
+                }
+                footer
             }
-            Spacer(minLength: 8)
-            footer
+            .padding(20)
         }
-        .frame(width: 280, height: 380)
-        .padding(20)
+        .frame(width: 320, height: 560)
         .background(AppPalette.panel)
         .onAppear { viewModel.onAppear() }
         .onDisappear { viewModel.onDisappear() }
+    }
+
+    private var header: some View {
+        HStack {
+            Image(systemName: "chart.bar.doc.horizontal")
+                .font(.title2)
+                .foregroundStyle(AppPalette.neutralGray)
+            Text("iStat Pulse")
+                .font(.headline)
+                .foregroundStyle(.primary)
+        }
+        .padding(.bottom, 4)
+    }
+
+    /// Summary bar: memory used, FPS, free disk, ping, CPU %, network ↓/↑.
+    private func globalSummaryBar(_ metrics: SystemMetrics) -> some View {
+        HStack(spacing: 8) {
+            Text("U \(viewModel.formattedBytes(metrics.memory.usedBytes))")
+                .font(.caption)
+                .foregroundStyle(AppPalette.neutralGray)
+            if let gpu = metrics.gpu, let fps = gpu.fps, fps > 0 {
+                Text("FPS \(Int(fps))")
+                    .font(.caption)
+                    .foregroundStyle(AppPalette.gpuCyan)
+            }
+            Text("F \(viewModel.formattedBytes(metrics.disk.totalBytes > metrics.disk.usedBytes ? metrics.disk.totalBytes - metrics.disk.usedBytes : 0))")
+                .font(.caption)
+                .foregroundStyle(AppPalette.neutralGray)
+            if let net = metrics.network, let ping = net.pingMilliseconds, ping > 0 {
+                Text("\(Int(ping))ms")
+                    .font(.caption)
+                    .foregroundStyle(AppPalette.neutralGray)
+            }
+            Text("CPU \(Int(metrics.cpu.usagePercent))%")
+                .font(.caption)
+                .foregroundStyle(AppPalette.cpuBlue)
+            if let net = metrics.network {
+                Text("\(viewModel.formattedBytes(net.sentBytesPerSecond))/s ↑")
+                    .font(.caption)
+                    .foregroundStyle(AppPalette.networkPink)
+                Text("\(viewModel.formattedBytes(net.receivedBytesPerSecond))/s ↓")
+                    .font(.caption)
+                    .foregroundStyle(AppPalette.networkPink)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 10)
+        .background(AppPalette.neutralGray.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    /// Hero: three large circular gauges — CPU, GPU, FANS.
+    private func heroSection(_ metrics: SystemMetrics) -> some View {
+        HStack(spacing: 16) {
+            heroGauge(
+                title: "CPU",
+                value: metrics.cpu.temperatureCelsius.map { String(format: "%.0f°", $0) } ?? String(format: "%.2f GHz", metrics.cpu.frequencyMHz / 1000),
+                subtitle: metrics.cpu.temperatureCelsius != nil ? String(format: "%.2f GHz", metrics.cpu.frequencyMHz / 1000) : nil,
+                progress: metrics.cpu.usagePercent / 100,
+                color: AppTheme.semanticColor(metric: .cpu, level: metrics.cpu.temperatureCelsius.map { AppTheme.thresholdLevel(cpuTempCelsius: $0) } ?? AppTheme.thresholdLevel(cpuUsagePercent: metrics.cpu.usagePercent))
+            )
+            if let gpu = metrics.gpu {
+                heroGauge(
+                    title: "GPU",
+                    value: gpu.temperatureCelsius.map { String(format: "%.0f°", $0) } ?? String(format: "%.2f GHz", gpu.frequencyMHz / 1000),
+                    subtitle: gpu.temperatureCelsius != nil ? String(format: "%.2f GHz", gpu.frequencyMHz / 1000) : nil,
+                    progress: gpu.utilizationPercent / 100,
+                    color: AppTheme.semanticColor(metric: .gpu, level: gpu.temperatureCelsius.map { AppTheme.thresholdLevel(gpuTempCelsius: $0) } ?? .normal)
+                )
+            }
+            fansHeroGauge(metrics.sensors)
+        }
+        .padding(.vertical, 8)
+    }
+
+    private func heroGauge(title: String, value: String, subtitle: String?, progress: Double, color: Color) -> some View {
+        VStack(spacing: 4) {
+            CircularGauge(value: progress, accentColor: color, secondaryColor: color.opacity(0.5), lineWidth: 4, glowEnabled: true, glowRadius: 6, glowOpacity: 0.4)
+                .frame(width: 52, height: 52)
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(AppPalette.neutralGray)
+            Text(value)
+                .font(.caption)
+                .fontWeight(.medium)
+                .foregroundStyle(color)
+            if let sub = subtitle, !sub.isEmpty {
+                Text(sub)
+                    .font(.caption2)
+                    .foregroundStyle(AppPalette.neutralGray.opacity(0.8))
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func fansHeroGauge(_ sensors: SensorMetrics?) -> some View {
+        let fansOn = (sensors?.fans.isEmpty == false) && (sensors?.fans.first?.1 ?? 0) > 0
+        let progress = fansOn ? min(1, (sensors?.fans.first?.1 ?? 0) / 4000) : 0
+        let color = AppPalette.neutralGray
+        return VStack(spacing: 4) {
+            CircularGauge(value: progress, accentColor: color, secondaryColor: color.opacity(0.5), lineWidth: 4, glowEnabled: false, glowRadius: 0, glowOpacity: 0)
+                .frame(width: 52, height: 52)
+            Text("FANS")
+                .font(.caption2)
+                .foregroundStyle(AppPalette.neutralGray)
+            Text(fansOn ? "\(Int(sensors?.fans.first?.1 ?? 0)) rpm" : "OFF")
+                .font(.caption)
+                .fontWeight(.medium)
+                .foregroundStyle(AppPalette.neutralGray)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    /// GPU section: header "GPU" / "X FPS" + 4 small gauges (Usage, MEM, TMP, Freq).
+    private func gpuSectionWithHeader(_ gpu: GPUMetrics?) -> some View {
+        Group {
+            if let g = gpu {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("GPU")
+                            .font(.subheadline)
+                            .foregroundStyle(AppPalette.neutralGray)
+                        Spacer()
+                        if let fps = g.fps, fps > 0 {
+                            Text("\(Int(fps)) FPS")
+                                .font(.caption)
+                                .foregroundStyle(AppPalette.gpuCyan)
+                        }
+                    }
+                    HStack(spacing: 12) {
+                        smallGaugeCell(title: "GPU", value: "\(Int(g.utilizationPercent))%", progress: g.utilizationPercent / 100, color: AppPalette.gpuCyan)
+                        smallGaugeCell(title: "MEM", value: g.memoryPercent.map { "\(Int($0))%" } ?? "—", progress: (g.memoryPercent ?? 0) / 100, color: AppPalette.memoryYellow)
+                        smallGaugeCell(title: "TMP", value: g.temperatureCelsius.map { "\(Int($0))°" } ?? "—", progress: (g.temperatureCelsius ?? 0) / 100, color: AppPalette.gpuCyan)
+                        smallGaugeCell(title: "GHz", value: g.frequencyMHz > 0 ? String(format: "%.2f", g.frequencyMHz / 1000) : "—", progress: min(1, g.frequencyMHz / 1500), color: AppPalette.gpuCyan)
+                    }
+                }
+            }
+        }
+    }
+
+    private func smallGaugeCell(title: String, value: String, progress: Double, color: Color) -> some View {
+        VStack(spacing: 2) {
+            CircularGauge(value: min(1, max(0, progress)), accentColor: color, secondaryColor: color.opacity(0.5), lineWidth: 2, glowEnabled: true, glowRadius: 2, glowOpacity: 0.3)
+                .frame(width: 36, height: 36)
+            Text(value)
+                .font(.caption2)
+                .foregroundStyle(color)
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(AppPalette.neutralGray.opacity(0.8))
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    /// 2×2 grid: Pressure, Memory, Battery, Battery Health.
+    private func pressureMemoryBatteryGrid(_ metrics: SystemMetrics) -> some View {
+        let mem = metrics.memory
+        let pressureColor = AppTheme.semanticColor(metric: .memory, level: AppTheme.thresholdLevel(memoryPercent: mem.pressurePercent))
+        let memoryColor = AppTheme.semanticColor(metric: .memory, level: AppTheme.thresholdLevel(memoryPercent: mem.usagePercent))
+        let battery = metrics.battery
+        let batteryColor = battery.map { AppTheme.semanticColor(metric: .battery, level: AppTheme.thresholdLevel(cpuUsagePercent: $0.percentage)) } ?? AppPalette.neutralGray
+        let healthPct = battery?.health.flatMap { _ in 100.0 } ?? 0
+        return VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                gridGauge(title: "PRESSURE", value: "\(Int(mem.pressurePercent))%", progress: mem.pressurePercent / 100, color: pressureColor)
+                gridGauge(title: "MEMORY", value: "\(Int(mem.usagePercent))%", progress: mem.usagePercent / 100, color: memoryColor)
+            }
+            HStack(spacing: 8) {
+                gridGauge(title: "BATTERY", value: battery.map { String(format: "%.0f%%", $0.percentage) + ($0.isCharging ? " ↑" : "") } ?? "—", progress: (battery?.percentage ?? 0) / 100, color: batteryColor)
+                gridGauge(title: "HEALTH", value: battery?.health.map { "\($0)" } ?? "—", progress: healthPct / 100, color: AppPalette.networkPink)
+            }
+        }
+    }
+
+    private func gridGauge(title: String, value: String, progress: Double, color: Color) -> some View {
+        VStack(spacing: 4) {
+            CircularGauge(value: min(1, max(0, progress)), accentColor: color, secondaryColor: color.opacity(0.5), lineWidth: AppTheme.metricGaugeLineWidth, glowEnabled: true, glowRadius: 3, glowOpacity: 0.35)
+                .frame(width: 44, height: 44)
+            Text(value)
+                .font(.caption)
+                .fontWeight(.medium)
+                .foregroundStyle(color)
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(AppPalette.neutralGray.opacity(0.8))
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    /// P/E cores: hollow circles + Efficiency (pink) / Performance (blue) labels.
+    private func peCoresRow(_ cpu: CPUMetrics) -> some View {
+        Group {
+            if cpu.coreCountP > 0 || cpu.coreCountE > 0 {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 4) {
+                        ForEach(0..<min(cpu.coreCount, 12), id: \.self) { _ in
+                            Circle()
+                                .stroke(AppPalette.neutralGray.opacity(0.5), lineWidth: 1)
+                                .frame(width: 6, height: 6)
+                        }
+                    }
+                    HStack(spacing: 16) {
+                        HStack(spacing: 4) {
+                            Circle().fill(AppPalette.networkPink).frame(width: 6, height: 6)
+                            Text("Efficiency Cores")
+                                .font(.caption2)
+                                .foregroundStyle(AppPalette.neutralGray)
+                        }
+                        Text("\(Int(cpu.eCoreUsagePercent))%")
+                            .font(.caption)
+                            .foregroundStyle(AppPalette.networkPink)
+                        HStack(spacing: 4) {
+                            Circle().fill(AppPalette.cpuBlue).frame(width: 6, height: 6)
+                            Text("Performance Cores")
+                                .font(.caption2)
+                                .foregroundStyle(AppPalette.neutralGray)
+                        }
+                        Text("\(Int(cpu.pCoreUsagePercent))%")
+                            .font(.caption)
+                            .foregroundStyle(AppPalette.cpuBlue)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Disk row: volume name + "X GB available".
+    private func diskRow(_ disk: DiskMetrics) -> some View {
+        let available = disk.totalBytes > disk.usedBytes ? disk.totalBytes - disk.usedBytes : UInt64(0)
+        let color = AppTheme.semanticColor(metric: .disk, level: AppTheme.thresholdLevel(diskUsagePercent: disk.usagePercent))
+        return HStack(spacing: 8) {
+            Image(systemName: "internaldrive")
+                .font(.body)
+                .foregroundStyle(AppPalette.neutralGray)
+                .frame(width: 20, alignment: .center)
+            Text(disk.volumeName.isEmpty ? "Macintosh HD" : disk.volumeName)
+                .font(.subheadline)
+                .foregroundStyle(AppPalette.neutralGray)
+            Spacer()
+            Text("\(viewModel.formattedBytes(available)) available")
+                .font(.caption)
+                .foregroundStyle(AppPalette.neutralGray.opacity(0.9))
+            CircularGauge(value: disk.usagePercent / 100, accentColor: color, secondaryColor: color.opacity(0.5), lineWidth: AppTheme.metricGaugeLineWidth, glowEnabled: true, glowRadius: 3, glowOpacity: 0.35)
+                .frame(width: 24, height: 24)
+        }
+    }
+
+    /// CPU section with User/System dual-series mini graph.
+    private func cpuSectionWithDualGraph(_ cpu: CPUMetrics) -> some View {
+        let level: ThresholdLevel = cpu.temperatureCelsius.map { AppTheme.thresholdLevel(cpuTempCelsius: $0) } ?? AppTheme.thresholdLevel(cpuUsagePercent: cpu.usagePercent)
+        let color = AppTheme.semanticColor(metric: .cpu, level: level)
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("CPU")
+                    .font(.subheadline)
+                    .foregroundStyle(AppPalette.neutralGray)
+                Spacer()
+                Text(cpu.summarySubtitle)
+                    .font(.caption)
+                    .foregroundStyle(AppPalette.neutralGray)
+            }
+            if !viewModel.sampleBuffers.cpuUser.samples.isEmpty || !viewModel.sampleBuffers.cpuSystem.samples.isEmpty {
+                DualSeriesMiniGraphView(
+                    primarySamples: viewModel.sampleBuffers.cpuUser.samples,
+                    secondarySamples: viewModel.sampleBuffers.cpuSystem.samples,
+                    primaryColor: AppPalette.cpuBlue,
+                    secondaryColor: AppPalette.networkPink,
+                    lineWidth: AppTheme.metricGraphLineWidth,
+                    fillOpacity: AppTheme.metricGraphFillOpacity
+                )
+                .frame(height: 22)
+                HStack(spacing: 12) {
+                    HStack(spacing: 4) {
+                        Circle().fill(AppPalette.cpuBlue).frame(width: 5, height: 5)
+                        Text("User \(Int(cpu.userPercent))%").font(.caption2).foregroundStyle(AppPalette.neutralGray)
+                    }
+                    HStack(spacing: 4) {
+                        Circle().fill(AppPalette.networkPink).frame(width: 5, height: 5)
+                        Text("System \(Int(cpu.systemPercent))%").font(.caption2).foregroundStyle(AppPalette.neutralGray)
+                    }
+                }
+            }
+        }
+        .animation(AppTheme.stateChangeAnimation, value: level)
+    }
+
+    private func gpuRow(_ gpu: GPUMetrics, graphSamples: [Double]) -> some View {
+        MetricRow(
+            title: "GPU",
+            icon: "square.stack.3d.up",
+            value: String(format: "%.0f%%", gpu.utilizationPercent),
+            subtitle: gpu.summarySubtitle.isEmpty ? "—" : gpu.summarySubtitle,
+            progress: gpu.utilizationPercent / 100,
+            accentColor: AppTheme.semanticColor(metric: .gpu, level: gpu.temperatureCelsius.map { AppTheme.thresholdLevel(gpuTempCelsius: $0) } ?? .normal),
+            graphSamples: graphSamples
+        )
+    }
+
+    /// Disk I/O: Read (pink) / Write (blue) dual-series + peak rates.
+    private func diskIOSection(_ disk: DiskMetrics) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                HStack(spacing: 4) {
+                    Circle().fill(AppPalette.networkPink).frame(width: 5, height: 5)
+                    Text("\(viewModel.formattedBytes(disk.readBytesPerSecond))/s Read")
+                        .font(.caption)
+                        .foregroundStyle(AppPalette.networkPink)
+                }
+                Spacer()
+                HStack(spacing: 4) {
+                    Circle().fill(AppPalette.cpuBlue).frame(width: 5, height: 5)
+                    Text("\(viewModel.formattedBytes(disk.writeBytesPerSecond))/s Write")
+                        .font(.caption)
+                        .foregroundStyle(AppPalette.cpuBlue)
+                }
+            }
+            if !viewModel.sampleBuffers.diskRead.samples.isEmpty || !viewModel.sampleBuffers.diskWrite.samples.isEmpty {
+                DualSeriesMiniGraphView(
+                    primarySamples: viewModel.sampleBuffers.diskRead.samples,
+                    secondarySamples: viewModel.sampleBuffers.diskWrite.samples,
+                    primaryColor: AppPalette.networkPink,
+                    secondaryColor: AppPalette.cpuBlue,
+                    lineWidth: AppTheme.metricGraphLineWidth,
+                    fillOpacity: AppTheme.metricGraphFillOpacity
+                )
+                .frame(height: 22)
+            }
+            HStack(spacing: 12) {
+                Text("Read \(viewModel.formattedBytes(disk.readBytesPerSecond))/s")
+                    .font(.caption2)
+                    .foregroundStyle(AppPalette.neutralGray)
+                Text("Write \(viewModel.formattedBytes(disk.writeBytesPerSecond))/s")
+                    .font(.caption2)
+                    .foregroundStyle(AppPalette.neutralGray)
+            }
+        }
+    }
+
+    /// Network: Upload (pink) / Download (blue) dual-series.
+    private func networkSectionWithDualGraph(_ network: NetworkMetrics) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                HStack(spacing: 4) {
+                    Circle().fill(AppPalette.networkPink).frame(width: 5, height: 5)
+                    Text("\(viewModel.formattedBytes(network.sentBytesPerSecond))/s Upload")
+                        .font(.caption)
+                        .foregroundStyle(AppPalette.networkPink)
+                }
+                Spacer()
+                HStack(spacing: 4) {
+                    Circle().fill(AppPalette.cpuBlue).frame(width: 5, height: 5)
+                    Text("\(viewModel.formattedBytes(network.receivedBytesPerSecond))/s Download")
+                        .font(.caption)
+                        .foregroundStyle(AppPalette.cpuBlue)
+                }
+            }
+            if !viewModel.sampleBuffers.networkTx.samples.isEmpty || !viewModel.sampleBuffers.networkRx.samples.isEmpty {
+                DualSeriesMiniGraphView(
+                    primarySamples: viewModel.sampleBuffers.networkTx.samples,
+                    secondarySamples: viewModel.sampleBuffers.networkRx.samples,
+                    primaryColor: AppPalette.networkPink,
+                    secondaryColor: AppPalette.cpuBlue,
+                    lineWidth: AppTheme.metricGraphLineWidth,
+                    fillOpacity: AppTheme.metricGraphFillOpacity
+                )
+                .frame(height: 22)
+            }
+        }
+    }
+
+    /// PING block: host + ms + green dot when active.
+    private func pingBlock(_ network: NetworkMetrics) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("PING")
+                .font(.caption2)
+                .foregroundStyle(AppPalette.neutralGray.opacity(0.8))
+            HStack(spacing: 6) {
+                if let ping = network.pingMilliseconds, ping > 0 {
+                    Circle().fill(AppPalette.batteryGreen).frame(width: 6, height: 6)
+                }
+                Text(network.pingHost ?? "—")
+                    .font(.caption)
+                    .foregroundStyle(.primary)
+                if let ping = network.pingMilliseconds, ping > 0 {
+                    Text("\(Int(ping))ms")
+                        .font(.caption)
+                        .foregroundStyle(AppPalette.neutralGray)
+                }
+            }
+        }
+        .padding(8)
+        .background(AppPalette.neutralGray.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    /// PUBLIC IP block.
+    private func publicIPBlock(_ network: NetworkMetrics) -> some View {
+        Group {
+            if let ip = network.publicIP, !ip.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("PUBLIC IP ADDRESSES")
+                        .font(.caption2)
+                        .foregroundStyle(AppPalette.neutralGray.opacity(0.8))
+                    Text(ip)
+                        .font(.caption)
+                        .foregroundStyle(.primary)
+                }
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(AppPalette.neutralGray.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+        }
+    }
+
+    /// Battery bar at bottom: horizontal progress + "X:XX until full" / "X:XX left".
+    private func batteryBar(_ battery: BatteryMetrics) -> some View {
+        let color = AppTheme.semanticColor(metric: .battery, level: AppTheme.thresholdLevel(cpuUsagePercent: battery.percentage))
+        let timeStr = viewModel.batteryTimeRemainingString(minutes: battery.timeRemainingMinutes, charging: battery.isCharging)
+        return VStack(alignment: .leading, spacing: 6) {
+            Text("BATTERY")
+                .font(.caption2)
+                .foregroundStyle(AppPalette.neutralGray.opacity(0.8))
+            HStack(spacing: 8) {
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(AppPalette.neutralGray.opacity(0.2))
+                            .frame(height: 8)
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(color)
+                            .frame(width: geo.size.width * (battery.percentage / 100), height: 8)
+                    }
+                }
+                .frame(height: 8)
+                if let t = timeStr {
+                    Text(battery.isCharging ? "\(t) until full" : "\(t) left")
+                        .font(.caption)
+                        .foregroundStyle(AppPalette.neutralGray)
+                }
+            }
+        }
+    }
+
+    private func sensorsRow(_ sensors: SensorMetrics) -> some View {
+        let subtitle = [
+            sensors.thermals.prefix(3).map { "\($0.0): \(Int($0.1))°C" }.joined(separator: ", "),
+            sensors.fans.prefix(2).map { "\($0.0): \(Int($0.1)) rpm" }.joined(separator: ", ")
+        ].filter { !$0.isEmpty }.joined(separator: " · ")
+        return MetricRow(
+            title: "Sensors",
+            icon: "sensor.fill",
+            value: sensors.thermals.isEmpty ? "—" : String(format: "%.0f°C max", sensors.thermals.map(\.1).max() ?? 0),
+            subtitle: subtitle.isEmpty ? "—" : subtitle,
+            progress: min(1, (sensors.thermals.map(\.1).max() ?? 0) / 100),
+            accentColor: AppPalette.gpuCyan,
+            graphSamples: []
+        )
+    }
+
+    /// Bottom nav: 5 icons (reference style).
+    private var bottomNav: some View {
+        HStack(spacing: 16) {
+            Image(systemName: "bolt.fill")
+                .font(.body)
+                .foregroundStyle(AppPalette.neutralGray)
+            Image(systemName: "square.grid.2x2")
+                .font(.body)
+                .foregroundStyle(AppPalette.neutralGray)
+            Image(systemName: "play.fill")
+                .font(.caption)
+                .foregroundStyle(AppPalette.neutralGray)
+            Image(systemName: "gearshape.fill")
+                .font(.body)
+                .foregroundStyle(AppPalette.neutralGray)
+            Image(systemName: "antenna.radiowaves.left.and.right")
+                .font(.body)
+                .foregroundStyle(AppPalette.neutralGray)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
     }
 
     private var footer: some View {
@@ -60,263 +567,6 @@ struct PopoverContentView: View {
             }
         }
     }
-
-    private var header: some View {
-        HStack {
-            Image(systemName: "chart.bar.doc.horizontal")
-                .font(.title2)
-                .foregroundStyle(AppPalette.neutralGray)
-            Text("iStat Pulse")
-                .font(.headline)
-                .foregroundStyle(.primary)
-        }
-        .padding(.bottom, 4)
-    }
-
-    /// Compact global summary bar (reference: iStat top bar – CPU %, ping, network).
-    private func globalSummaryBar(_ metrics: SystemMetrics) -> some View {
-        HStack(spacing: 10) {
-            Text("CPU \(Int(metrics.cpu.usagePercent))%")
-                .font(.caption)
-                .foregroundStyle(AppPalette.cpuBlue)
-            if let net = metrics.network {
-                let total = net.receivedBytesPerSecond + net.sentBytesPerSecond
-                Text("↓ \(viewModel.formattedBytes(net.receivedBytesPerSecond))/s ↑ \(viewModel.formattedBytes(net.sentBytesPerSecond))/s")
-                    .font(.caption)
-                    .foregroundStyle(AppPalette.networkPink)
-                if let ping = net.pingMilliseconds, ping > 0 {
-                    Text("\(Int(ping)) ms")
-                        .font(.caption)
-                        .foregroundStyle(AppPalette.neutralGray)
-                }
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.vertical, 6)
-        .padding(.horizontal, 10)
-        .background(AppPalette.neutralGray.opacity(0.12))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-    }
-
-    private func metricsSections(_ metrics: SystemMetrics) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            cpuSection(metrics.cpu, graphSamples: viewModel.sampleBuffers.cpu.samples)
-            Divider()
-                .background(AppPalette.neutralGray.opacity(0.3))
-            if let gpu = metrics.gpu {
-                gpuSection(gpu, graphSamples: viewModel.sampleBuffers.gpu.samples)
-                Divider()
-                    .background(AppPalette.neutralGray.opacity(0.3))
-            }
-            memorySection(metrics.memory, graphSamples: viewModel.sampleBuffers.memory.samples)
-            Divider()
-                .background(AppPalette.neutralGray.opacity(0.3))
-            diskSection(metrics.disk, graphSamples: viewModel.sampleBuffers.disk.samples)
-            if let network = metrics.network {
-                Divider()
-                    .background(AppPalette.neutralGray.opacity(0.3))
-                networkSection(network, graphSamples: viewModel.sampleBuffers.network.samples)
-            }
-            if let battery = metrics.battery {
-                Divider()
-                    .background(AppPalette.neutralGray.opacity(0.3))
-                batterySection(battery, graphSamples: viewModel.sampleBuffers.battery.samples)
-            }
-            if let sensors = metrics.sensors, (!sensors.thermals.isEmpty || !sensors.fans.isEmpty) {
-                Divider()
-                    .background(AppPalette.neutralGray.opacity(0.3))
-                sensorsSection(sensors)
-            }
-        }
-    }
-
-    private func batterySection(_ battery: BatteryMetrics, graphSamples: [Double] = []) -> some View {
-        let level = AppTheme.thresholdLevel(cpuUsagePercent: battery.percentage)
-        let color = AppTheme.semanticColor(metric: .battery, level: level)
-        let subtitle = batterySubtitle(battery)
-        return MetricRow(
-            title: "Battery",
-            icon: "battery.100",
-            value: String(format: "%.0f%%", battery.percentage) + (battery.isCharging ? " ↑" : ""),
-            subtitle: subtitle,
-            progress: battery.percentage / 100,
-            accentColor: color,
-            graphSamples: graphSamples
-        )
-        .animation(AppTheme.stateChangeAnimation, value: level)
-    }
-
-    private func batterySubtitle(_ battery: BatteryMetrics) -> String {
-        var parts: [String] = []
-        if let h = battery.health, !h.isEmpty { parts.append(h) }
-        if let c = battery.cycleCount { parts.append("\(c) cycles") }
-        if battery.isCharging {
-            if let m = battery.timeRemainingMinutes, m > 0 { parts.append("~\(m) min to full") }
-        } else if let m = battery.timeRemainingMinutes, m > 0 { parts.append("~\(m) min left") }
-        if let r = battery.chargeRate, r != 0 { parts.append(String(format: "%.0f A", r)) }
-        return parts.isEmpty ? "—" : parts.joined(separator: " · ")
-    }
-
-    private func sensorsSection(_ sensors: SensorMetrics) -> some View {
-        let color = AppTheme.semanticColor(metric: .gpu, level: .normal)
-        let subtitle = sensorsSubtitle(sensors)
-        let maxTemp = sensors.thermals.map(\.1).max() ?? 0
-        let progress = maxTemp > 0 ? min(1.0, maxTemp / 100) : 0
-        return MetricRow(
-            title: "Sensors",
-            icon: "sensor.fill",
-            value: sensors.thermals.isEmpty ? "—" : String(format: "%.0f°C max", maxTemp),
-            subtitle: subtitle,
-            progress: progress,
-            accentColor: color,
-            graphSamples: []
-        )
-    }
-
-    private func sensorsSubtitle(_ sensors: SensorMetrics) -> String {
-        var parts: [String] = []
-        if !sensors.thermals.isEmpty {
-            parts.append(sensors.thermals.prefix(3).map { "\($0.0): \(Int($0.1))°C" }.joined(separator: ", "))
-        }
-        if !sensors.fans.isEmpty {
-            parts.append(sensors.fans.prefix(2).map { "\($0.0): \(Int($0.1)) rpm" }.joined(separator: ", "))
-        }
-        return parts.isEmpty ? "—" : parts.joined(separator: " · ")
-    }
-
-    private func networkSection(_ network: NetworkMetrics, graphSamples: [Double] = []) -> some View {
-        let color = AppTheme.semanticColor(metric: .network, level: .normal)
-        let subtitle = networkSubtitle(network)
-        let rx = network.receivedBytesPerSecond
-        let tx = network.sentBytesPerSecond
-        let total = rx + tx
-        let progress = total > 0 ? min(1.0, Double(total) / 100_000_000) : 0
-        let value = "↓ \(viewModel.formattedBytes(rx))/s ↑ \(viewModel.formattedBytes(tx))/s"
-        return MetricRow(
-            title: "Network",
-            icon: "network",
-            value: value,
-            subtitle: subtitle,
-            progress: progress,
-            accentColor: color,
-            graphSamples: graphSamples
-        )
-    }
-
-    private func networkSubtitle(_ network: NetworkMetrics) -> String {
-        var parts: [String] = []
-        if let ping = network.pingMilliseconds, ping > 0 { parts.append("ping \(String(format: "%.0f", ping)) ms") }
-        if !network.perInterface.isEmpty {
-            let names = network.perInterface.map(\.name).joined(separator: ", ")
-            parts.append(names)
-        }
-        if parts.isEmpty { return "—" }
-        return parts.joined(separator: " · ")
-    }
-
-    private func gpuSection(_ gpu: GPUMetrics, graphSamples: [Double] = []) -> some View {
-        let level: ThresholdLevel = if let temp = gpu.temperatureCelsius, temp > 0 {
-            AppTheme.thresholdLevel(gpuTempCelsius: temp)
-        } else {
-            AppTheme.thresholdLevel(cpuUsagePercent: gpu.utilizationPercent)
-        }
-        let color = AppTheme.semanticColor(metric: .gpu, level: level)
-        return MetricRow(
-            title: "GPU",
-            icon: "square.stack.3d.up",
-            value: String(format: "%.0f%%", gpu.utilizationPercent),
-            subtitle: gpu.summarySubtitle.isEmpty ? "—" : gpu.summarySubtitle,
-            progress: gpu.utilizationPercent / 100,
-            accentColor: color,
-            graphSamples: graphSamples
-        )
-        .animation(AppTheme.stateChangeAnimation, value: level)
-    }
-
-    private func cpuSection(_ cpu: CPUMetrics, graphSamples: [Double] = []) -> some View {
-        let level: ThresholdLevel = if let temp = cpu.temperatureCelsius, temp > 0 {
-            AppTheme.thresholdLevel(cpuTempCelsius: temp)
-        } else {
-            AppTheme.thresholdLevel(cpuUsagePercent: cpu.usagePercent)
-        }
-        let color = AppTheme.semanticColor(metric: .cpu, level: level)
-        return VStack(alignment: .leading, spacing: 6) {
-            MetricRow(
-                title: "CPU",
-                icon: "cpu",
-                value: String(format: "%.0f%%", cpu.usagePercent),
-                subtitle: cpu.summarySubtitle,
-                progress: cpu.usagePercent / 100,
-                accentColor: color,
-                graphSamples: graphSamples
-            )
-            if cpu.coreCountP > 0 || cpu.coreCountE > 0 {
-                HStack(spacing: 12) {
-                    if cpu.coreCountP > 0 {
-                        HStack(spacing: 4) {
-                            Circle().fill(AppPalette.cpuBlue).frame(width: 6, height: 6)
-                            Text("P \(Int(cpu.pCoreUsagePercent))%").font(.caption2).foregroundStyle(AppPalette.neutralGray)
-                        }
-                    }
-                    if cpu.coreCountE > 0 {
-                        HStack(spacing: 4) {
-                            Circle().fill(AppPalette.criticalRed).frame(width: 6, height: 6)
-                            Text("E \(Int(cpu.eCoreUsagePercent))%").font(.caption2).foregroundStyle(AppPalette.neutralGray)
-                        }
-                    }
-                }
-            }
-        }
-        .animation(AppTheme.stateChangeAnimation, value: level)
-    }
-
-    private func memorySection(_ mem: MemoryMetrics, graphSamples: [Double] = []) -> some View {
-        let level = AppTheme.thresholdLevel(memoryPercent: mem.pressurePercent)
-        let color = AppTheme.semanticColor(metric: .memory, level: level)
-        let subtitle = memorySubtitle(mem)
-        return MetricRow(
-            title: "Memory",
-            icon: "memorychip",
-            value: String(format: "%.0f%%", mem.pressurePercent),
-            subtitle: subtitle,
-            progress: mem.pressurePercent / 100,
-            accentColor: color,
-            graphSamples: graphSamples
-        )
-        .animation(AppTheme.stateChangeAnimation, value: level)
-    }
-
-    private func memorySubtitle(_ mem: MemoryMetrics) -> String {
-        var parts: [String] = ["\(viewModel.formattedBytes(mem.usedBytes)) of \(viewModel.formattedBytes(mem.totalBytes))"]
-        if mem.wiredBytes > 0 { parts.append("wired \(viewModel.formattedBytes(mem.wiredBytes))") }
-        if mem.compressedBytes > 0 { parts.append("comp \(viewModel.formattedBytes(mem.compressedBytes))") }
-        if mem.swapUsedBytes > 0 { parts.append("swap \(viewModel.formattedBytes(mem.swapUsedBytes))") }
-        return parts.joined(separator: " · ")
-    }
-
-    private func diskSection(_ disk: DiskMetrics, graphSamples: [Double] = []) -> some View {
-        let level = AppTheme.thresholdLevel(diskUsagePercent: disk.usagePercent)
-        let color = AppTheme.semanticColor(metric: .disk, level: level)
-        let subtitle = diskSubtitle(disk)
-        return MetricRow(
-            title: "Disk",
-            icon: "internaldrive",
-            value: String(format: "%.0f%%", disk.usagePercent),
-            subtitle: subtitle,
-            progress: disk.usagePercent / 100,
-            accentColor: color,
-            graphSamples: graphSamples
-        )
-        .animation(AppTheme.stateChangeAnimation, value: level)
-    }
-
-    private func diskSubtitle(_ disk: DiskMetrics) -> String {
-        var parts: [String] = ["\(viewModel.formattedBytes(disk.usedBytes)) of \(viewModel.formattedBytes(disk.totalBytes))"]
-        if disk.readBytesPerSecond > 0 || disk.writeBytesPerSecond > 0 {
-            parts.append("↓ \(viewModel.formattedBytes(disk.readBytesPerSecond))/s ↑ \(viewModel.formattedBytes(disk.writeBytesPerSecond))/s")
-        }
-        return parts.joined(separator: " · ")
-    }
 }
 
 private struct MetricRow: View {
@@ -326,7 +576,6 @@ private struct MetricRow: View {
     let subtitle: String
     let progress: Double
     var accentColor: Color = AppPalette.neutralGray
-    /// Optional sample history for mini graph (0...1); shown when non-empty.
     var graphSamples: [Double] = []
 
     var body: some View {

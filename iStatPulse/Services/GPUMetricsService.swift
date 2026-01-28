@@ -28,6 +28,7 @@ private let kTilerUtilization = "Tiler Utilization %"
 final class GPUMetricsService: @unchecked Sendable, Refreshable {
     private let subject = CurrentValueSubject<GPUMetrics, Never>(GPUMetrics(
         utilizationPercent: 0,
+        memoryPercent: nil,
         frequencyMHz: 0,
         temperatureCelsius: nil,
         fps: nil
@@ -65,8 +66,10 @@ final class GPUMetricsService: @unchecked Sendable, Refreshable {
         let frequencyMHz = readFrequencyFromIORegistry()
         let temperature = readGPUTemperature()
 
+        let memoryPercent = readMemoryPercentFromIORegistry()
         let metrics = GPUMetrics(
             utilizationPercent: utilization,
+            memoryPercent: memoryPercent,
             frequencyMHz: frequencyMHz,
             temperatureCelsius: temperature,
             fps: nil
@@ -169,6 +172,42 @@ final class GPUMetricsService: @unchecked Sendable, Refreshable {
             if let t = smcThermal.readTemperature(key: key), t > 0, t < 120 { return t }
         }
         return nil
+    }
+
+    /// GPU memory usage 0–100 when available from IORegistry; nil otherwise.
+    private func readMemoryPercentFromIORegistry() -> Double? {
+        for className in [kAGXAcceleratorClassName, kIOAcceleratorClassName] {
+            if let pct = readMemoryPercentFromClass(className) { return pct }
+        }
+        return nil
+    }
+
+    private func readMemoryPercentFromClass(_ className: String) -> Double? {
+        return className.withCString { cStr in
+            let match = IOServiceMatching(cStr)
+            var iterator: io_iterator_t = 0
+            defer { if iterator != 0 { IOObjectRelease(iterator) } }
+            guard IOServiceGetMatchingServices(kIOMasterPortDefault, match, &iterator) == KERN_SUCCESS else { return nil }
+            var service = IOIteratorNext(iterator)
+            defer { if service != 0 { IOObjectRelease(service) } }
+            while service != 0 {
+                defer { IOObjectRelease(service); service = IOIteratorNext(iterator) }
+                if let stats = getPerformanceStatistics(service: service) {
+                    if let used = numberFrom(stats, keys: ["VRAM Used", "vramUsed", "Device GPU Dedicated Memory Used"]),
+                       let total = numberFrom(stats, keys: ["VRAM Total", "vramTotal", "Device GPU Dedicated Memory Total", "Device GPU Dedicated Memory"]),
+                       total > 0 {
+                        return min(100, max(0, (used / total) * 100))
+                    }
+                }
+                if let dict = getPropertiesDict(service: service),
+                   let used = numberFrom(dict, keys: ["VRAM Used", "vramUsed"]),
+                   let total = numberFrom(dict, keys: ["VRAM Total", "vramTotal"]),
+                   total > 0 {
+                    return min(100, max(0, (used / total) * 100))
+                }
+            }
+            return nil
+        }
     }
 }
 #endif

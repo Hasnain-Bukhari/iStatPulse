@@ -16,7 +16,9 @@ final class NetworkMetricsService: @unchecked Sendable, Refreshable {
         receivedBytesPerSecond: 0,
         sentBytesPerSecond: 0,
         perInterface: [],
-        pingMilliseconds: nil
+        pingHost: nil,
+        pingMilliseconds: nil,
+        publicIP: nil
     ))
     private var timer: DispatchSourceTimer?
     private var pingTimer: DispatchSourceTimer?
@@ -27,7 +29,7 @@ final class NetworkMetricsService: @unchecked Sendable, Refreshable {
     private var previousPerInterface: [String: (received: UInt64, sent: UInt64)] = [:]
 
     /// Ping target; nil disables ping.
-    var pingHost: String? = "8.8.8.8"
+    var pingHost: String? = "1.1.1.1"
     var pingInterval: TimeInterval = 5.0
     var pingTimeout: TimeInterval = 2.0
 
@@ -89,12 +91,14 @@ final class NetworkMetricsService: @unchecked Sendable, Refreshable {
             totalRxBps = totalRxBps &+ rxBps
             totalTxBps = totalTxBps &+ txBps
         }
-        let ping = subject.value.pingMilliseconds
+        let existing = subject.value
         subject.send(NetworkMetrics(
             receivedBytesPerSecond: totalRxBps,
             sentBytesPerSecond: totalTxBps,
             perInterface: perInterface,
-            pingMilliseconds: ping
+            pingHost: pingHost,
+            pingMilliseconds: existing.pingMilliseconds,
+            publicIP: existing.publicIP
         ))
     }
 
@@ -107,7 +111,9 @@ final class NetworkMetricsService: @unchecked Sendable, Refreshable {
                 receivedBytesPerSecond: current.receivedBytesPerSecond,
                 sentBytesPerSecond: current.sentBytesPerSecond,
                 perInterface: current.perInterface,
-                pingMilliseconds: rtt
+                pingHost: self.pingHost,
+                pingMilliseconds: rtt,
+                publicIP: current.publicIP
             ))
         }
     }

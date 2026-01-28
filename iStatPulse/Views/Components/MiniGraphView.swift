@@ -70,6 +70,63 @@ struct MiniGraphView: View {
     }
 }
 
+// MARK: - Dual-Series Mini Graph (e.g. User/System, Read/Write, Upload/Download)
+
+/// Two series drawn with different colors; primary (e.g. user/read/upload) and secondary (system/write/download).
+struct DualSeriesMiniGraphView: View {
+    var primarySamples: [Double]
+    var secondarySamples: [Double]
+    var primaryColor: Color = AppPalette.cpuBlue
+    var secondaryColor: Color = AppPalette.networkPink
+    var lineWidth: CGFloat = 1.5
+    var fillOpacity: Double = 0.12
+    var cornerRadius: CGFloat = 2
+
+    var body: some View {
+        Canvas { context, size in
+            let count = max(primarySamples.count, secondarySamples.count)
+            guard count > 1, size.width > 0, size.height > 0 else { return }
+            let w = size.width
+            let h = size.height
+            let stepX = w / CGFloat(count - 1)
+
+            func path(for samples: [Double]) -> Path {
+                var p = Path()
+                guard !samples.isEmpty else { return p }
+                let y0 = h * (1 - CGFloat(min(1, max(0, samples[0]))))
+                p.move(to: CGPoint(x: 0, y: y0))
+                for i in 1..<samples.count {
+                    let x = CGFloat(i) * stepX
+                    let y = h * (1 - CGFloat(min(1, max(0, samples[i]))))
+                    p.addLine(to: CGPoint(x: x, y: y))
+                }
+                return p
+            }
+
+            if primarySamples.count > 1 {
+                let fillPath = path(for: primarySamples)
+                var closed = fillPath
+                closed.addLine(to: CGPoint(x: CGFloat(primarySamples.count - 1) * stepX, y: h))
+                closed.addLine(to: CGPoint(x: 0, y: h))
+                closed.closeSubpath()
+                context.fill(closed, with: .color(primaryColor.opacity(fillOpacity)))
+                context.stroke(fillPath, with: .color(primaryColor), style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round))
+            }
+            if secondarySamples.count > 1 {
+                let fillPath = path(for: secondarySamples)
+                var closed = fillPath
+                closed.addLine(to: CGPoint(x: CGFloat(secondarySamples.count - 1) * stepX, y: h))
+                closed.addLine(to: CGPoint(x: 0, y: h))
+                closed.closeSubpath()
+                context.fill(closed, with: .color(secondaryColor.opacity(fillOpacity)))
+                context.stroke(fillPath, with: .color(secondaryColor), style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round))
+            }
+        }
+        .drawingGroup()
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+    }
+}
+
 // MARK: - Preview
 
 #Preview("MiniGraph") {

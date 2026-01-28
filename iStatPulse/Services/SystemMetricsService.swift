@@ -26,6 +26,7 @@ final class SystemMetricsService: @unchecked Sendable, SystemMetricsServiceProto
     private let gpuService: GPUMetricsService
     private let fpsSampler: FPSSampler
     private let networkService: NetworkMetricsService
+    private let publicIPService: PublicIPService
     private let batteryService: BatteryMetricsService
     private let sensorsService: SMCSensorsService
 
@@ -51,6 +52,7 @@ final class SystemMetricsService: @unchecked Sendable, SystemMetricsServiceProto
         gpuService: GPUMetricsService = GPUMetricsService(),
         fpsSampler: FPSSampler = FPSSampler(),
         networkService: NetworkMetricsService = NetworkMetricsService(),
+        publicIPService: PublicIPService = PublicIPService(),
         batteryService: BatteryMetricsService = BatteryMetricsService(),
         sensorsService: SMCSensorsService = SMCSensorsService(),
         refreshInterval: TimeInterval = RefreshEngine.defaultInterval
@@ -61,6 +63,7 @@ final class SystemMetricsService: @unchecked Sendable, SystemMetricsServiceProto
         self.gpuService = gpuService
         self.fpsSampler = fpsSampler
         self.networkService = networkService
+        self.publicIPService = publicIPService
         self.batteryService = batteryService
         self.sensorsService = sensorsService
         let refreshables: [Refreshable] = [cpuService, memoryService, diskService, gpuService, networkService, batteryService, sensorsService]
@@ -83,6 +86,7 @@ final class SystemMetricsService: @unchecked Sendable, SystemMetricsServiceProto
             gpuService: GPUMetricsService(),
             fpsSampler: FPSSampler(),
             networkService: NetworkMetricsService(),
+            publicIPService: PublicIPService(),
             batteryService: BatteryMetricsService(),
             sensorsService: SMCSensorsService()
         )
@@ -96,9 +100,25 @@ final class SystemMetricsService: @unchecked Sendable, SystemMetricsServiceProto
         .map { gpu, fps in
             GPUMetrics(
                 utilizationPercent: gpu.utilizationPercent,
+                memoryPercent: gpu.memoryPercent,
                 frequencyMHz: gpu.frequencyMHz,
                 temperatureCelsius: gpu.temperatureCelsius,
                 fps: fps
+            )
+        }
+
+        let networkWithPublicIP = Publishers.CombineLatest(
+            networkService.metricsPublisher,
+            publicIPService.publicIPPublisher
+        )
+        .map { net, publicIP in
+            NetworkMetrics(
+                receivedBytesPerSecond: net.receivedBytesPerSecond,
+                sentBytesPerSecond: net.sentBytesPerSecond,
+                perInterface: net.perInterface,
+                pingHost: net.pingHost,
+                pingMilliseconds: net.pingMilliseconds,
+                publicIP: publicIP
             )
         }
 
@@ -108,7 +128,7 @@ final class SystemMetricsService: @unchecked Sendable, SystemMetricsServiceProto
                 memoryService.metricsPublisher,
                 diskService.metricsPublisher
             ),
-            Publishers.CombineLatest(gpuWithFPS, networkService.metricsPublisher)
+            Publishers.CombineLatest(gpuWithFPS, networkWithPublicIP)
         )
         .map { ($0.0, $0.1.0, $0.1.1) }
 
@@ -141,12 +161,14 @@ final class SystemMetricsService: @unchecked Sendable, SystemMetricsServiceProto
     func startPolling() {
         engine.start()
         fpsSampler.start()
+        publicIPService.start()
     }
 
     /// Stop the engine and FPS sampler.
     func stopPolling() {
         engine.stop()
         fpsSampler.stop()
+        publicIPService.stop()
     }
 }
 

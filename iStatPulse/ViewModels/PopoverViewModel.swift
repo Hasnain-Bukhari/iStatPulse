@@ -74,6 +74,17 @@ final class PopoverViewModel: ObservableObject {
     func formattedBytes(_ bytes: UInt64) -> String {
         ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .memory)
     }
+
+    /// Battery time remaining as "X:XX" (e.g. "1:11" for 1h 11m) or "~X min" when < 60 min.
+    func batteryTimeRemainingString(minutes: Int?, charging: Bool) -> String? {
+        guard let m = minutes, m > 0 else { return nil }
+        if m >= 60 {
+            let h = m / 60
+            let min = m % 60
+            return String(format: "%d:%02d", h, min)
+        }
+        return "~\(m) min"
+    }
 }
 
 #endif

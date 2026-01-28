@@ -15,6 +15,8 @@ import Darwin
 final class CPUMetricsService: @unchecked Sendable, Refreshable {
     private let subject = CurrentValueSubject<CPUMetrics, Never>(CPUMetrics(
         usagePercent: 0,
+        userPercent: 0,
+        systemPercent: 0,
         coreCount: 0,
         perCoreUsage: [],
         coreCountP: 0,
@@ -85,6 +87,8 @@ final class CPUMetricsService: @unchecked Sendable, Refreshable {
 
         let perCoreUsage: [Double]
         let usagePercent: Double
+        var userPercent: Double = 0
+        var systemPercent: Double = 0
         let pCoreUsagePercent: Double
         let eCoreUsagePercent: Double
 
@@ -96,6 +100,9 @@ final class CPUMetricsService: @unchecked Sendable, Refreshable {
             var pTotal: Double = 0
             var eUsed: Double = 0
             var eTotal: Double = 0
+            var sumUserDelta: Int64 = 0
+            var sumSystemDelta: Int64 = 0
+            var sumIdleDelta: Int64 = 0
             let (pCount, eCount) = SysctlCPUInfo.pCoreAndECoreCounts
             let pEnd = min(pCount, n)
             let eEnd = min(pCount + eCount, n)
@@ -104,6 +111,9 @@ final class CPUMetricsService: @unchecked Sendable, Refreshable {
                 let (cu, cs, ci, cn) = currentTicks[i]
                 let usedDelta = (cu - pu) + (cs - ps) + (cn - pn)
                 let totalDelta = usedDelta + (ci - pi)
+                sumUserDelta += (cu - pu)
+                sumSystemDelta += (cs - ps)
+                sumIdleDelta += (ci - pi)
                 let coreUsage: Double = totalDelta > 0 ? min(100, max(0, (Double(usedDelta) / Double(totalDelta)) * 100)) : 0
                 perCore.append(coreUsage)
                 totalUsed += coreUsage
@@ -116,6 +126,11 @@ final class CPUMetricsService: @unchecked Sendable, Refreshable {
                     eTotal += 100
                 }
             }
+            let totalDelta = sumUserDelta + sumSystemDelta + sumIdleDelta
+            if totalDelta > 0 {
+                userPercent = min(100, max(0, (Double(sumUserDelta) / Double(totalDelta)) * 100))
+                systemPercent = min(100, max(0, (Double(sumSystemDelta) / Double(totalDelta)) * 100))
+            }
             let avg = totalTotal > 0 ? totalUsed / totalTotal * 100 : 0
             let pAvg = pTotal > 0 ? pUsed / pTotal * 100 : 0
             let eAvg = eTotal > 0 ? eUsed / eTotal * 100 : 0
@@ -127,13 +142,23 @@ final class CPUMetricsService: @unchecked Sendable, Refreshable {
             // First sample or count changed: use instantaneous snapshot (no deltas).
             var perCore: [Double] = []
             var sum: Double = 0
+            var sumUser: Int64 = 0
+            var sumSystem: Int64 = 0
+            var sumTotal: Int64 = 0
             for i in 0..<n {
                 let (user, system, idle, nice) = currentTicks[i]
                 let total = user + system + idle + nice
                 let used = user + system + nice
+                sumUser += user
+                sumSystem += system
+                sumTotal += total
                 let coreUsage: Double = total > 0 ? (Double(used) / Double(total)) * 100 : 0
                 perCore.append(coreUsage)
                 sum += coreUsage
+            }
+            if sumTotal > 0 {
+                userPercent = min(100, max(0, (Double(sumUser) / Double(sumTotal)) * 100))
+                systemPercent = min(100, max(0, (Double(sumSystem) / Double(sumTotal)) * 100))
             }
             let avg = n > 0 ? sum / Double(n) : 0
             let (pCount, eCount) = SysctlCPUInfo.pCoreAndECoreCounts
@@ -160,6 +185,8 @@ final class CPUMetricsService: @unchecked Sendable, Refreshable {
 
         let metrics = CPUMetrics(
             usagePercent: usagePercent,
+            userPercent: userPercent,
+            systemPercent: systemPercent,
             coreCount: n,
             perCoreUsage: perCoreUsage,
             coreCountP: coreCountP,
@@ -176,6 +203,8 @@ final class CPUMetricsService: @unchecked Sendable, Refreshable {
         let n = SysctlCPUInfo.logicalCPUCount
         subject.send(CPUMetrics(
             usagePercent: 0,
+            userPercent: 0,
+            systemPercent: 0,
             coreCount: max(1, n),
             perCoreUsage: [],
             coreCountP: SysctlCPUInfo.coreCountP,

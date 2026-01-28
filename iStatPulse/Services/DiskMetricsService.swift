@@ -13,7 +13,7 @@ import Combine
 
 final class DiskMetricsService: @unchecked Sendable, Refreshable {
     private let subject = CurrentValueSubject<DiskMetrics, Never>(
-        DiskMetrics(usedBytes: 0, totalBytes: 0, usagePercent: 0, readBytesPerSecond: 0, writeBytesPerSecond: 0)
+        DiskMetrics(usedBytes: 0, totalBytes: 0, usagePercent: 0, volumeName: "", readBytesPerSecond: 0, writeBytesPerSecond: 0)
     )
     private var timer: DispatchSourceTimer?
     private let queue = DispatchQueue(label: "com.istatpulse.disk", qos: .userInitiated)
@@ -51,6 +51,8 @@ final class DiskMetricsService: @unchecked Sendable, Refreshable {
         let (total, available) = VolumeSpace.rootVolumeBytes()
         let used = total > available ? total - available : 0
         let usagePercent = total > 0 ? (Double(used) / Double(total)) * 100.0 : 0
+        let volumeName = (FileManager.default.displayName(atPath: "/")).trimmingCharacters(in: .whitespacesAndNewlines)
+        let displayName = volumeName.isEmpty ? "Macintosh HD" : volumeName
 
         // Rolling 1-second throughput from IOKit cumulative bytes.
         let (cumulativeRead, cumulativeWrite) = DiskIOStats.cumulativeBytes()
@@ -66,6 +68,7 @@ final class DiskMetricsService: @unchecked Sendable, Refreshable {
             usedBytes: used,
             totalBytes: total,
             usagePercent: min(100, usagePercent),
+            volumeName: displayName,
             readBytesPerSecond: readBps,
             writeBytesPerSecond: writeBps
         ))

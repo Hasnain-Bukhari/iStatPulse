@@ -59,14 +59,20 @@ struct NetworkMetrics: Sendable {
     let sentBytesPerSecond: UInt64
     /// Per-interface stats (e.g. en0, bridge0).
     let perInterface: [InterfaceStats]
+    /// Ping target host (e.g. "1.1.1.1"). nil when ping disabled.
+    let pingHost: String?
     /// ICMP ping RTT in ms. nil when not measured or failed.
     let pingMilliseconds: Double?
+    /// Public IP address when fetched (e.g. ipify). nil when not yet loaded or failed.
+    let publicIP: String?
 }
 
 /// GPU metrics: utilization (IORegistry/Metal), clocks, thermal, FPS.
 struct GPUMetrics: Sendable {
     /// GPU utilization 0–100 (from IORegistry PerformanceStatistics or Metal).
     let utilizationPercent: Double
+    /// GPU memory usage 0–100 when available (e.g. IORegistry); nil otherwise.
+    let memoryPercent: Double?
     /// Current GPU frequency in MHz. 0 when unavailable.
     let frequencyMHz: Double
     /// GPU temperature in °C (SMC or IORegistry). nil when unavailable.
@@ -87,6 +93,10 @@ struct GPUMetrics: Sendable {
 struct CPUMetrics: Sendable {
     /// Overall CPU usage (0–100).
     let usagePercent: Double
+    /// User-space CPU usage (0–100). Sum of all cores' user ticks.
+    let userPercent: Double
+    /// Kernel/system CPU usage (0–100). Sum of all cores' system ticks.
+    let systemPercent: Double
     /// Total logical cores.
     let coreCount: Int
     /// Per-core usage (0–100), one element per logical core. Empty until deltas available.
@@ -154,6 +164,8 @@ struct DiskMetrics: Sendable {
     let usedBytes: UInt64
     let totalBytes: UInt64
     let usagePercent: Double
+    /// Display name of root volume (e.g. "Macintosh HD"). Empty when unavailable.
+    let volumeName: String
     /// Read throughput in bytes per second (rolling 1-second window).
     let readBytesPerSecond: UInt64
     /// Write throughput in bytes per second (rolling 1-second window).
