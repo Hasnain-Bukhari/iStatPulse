@@ -25,6 +25,19 @@ iStat Pulse provides **at-a-glance system metrics** in the menu bar, inspired by
 
 ---
 
+## Screenshots
+
+Add images under `docs/images/` and keep the names below.
+
+| View | Preview |
+|------|---------|
+| Popover (dark) | ![Popover dark](image.png) |
+| Popover (dark) | ![Popover dark](image.png) |
+| Popover (light) | ![Popover light](docs/images/screenshot-2.png) |
+| Popover (light) | ![Popover light](docs/images/screenshot-2.png) |
+
+---
+
 ## Requirements
 
 - **macOS 15.6+** (Xcode 16+, Swift 5)
