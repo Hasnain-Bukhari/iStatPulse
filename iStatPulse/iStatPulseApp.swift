@@ -26,9 +26,11 @@ struct iStatPulseApp: App {
 
     var body: some Scene {
 #if os(macOS)
-        MenuBarExtra("iStat Pulse", systemImage: "chart.bar.doc.horizontal") {
+        MenuBarExtra {
             PopoverContentView()
                 .frame(width: 384, height: 784)
+        } label: {
+            MenuBarLabelView()
         }
         .menuBarExtraStyle(.window)
 #else
