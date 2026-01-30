@@ -32,7 +32,7 @@ Add images under `docs/images/` and keep the names below.
 | View | Preview |
 |------|---------|
 | Popover (dark) | ![Popover dark](docs/images/img-1.png) |
-| Popover (dark) | ![Popover dark](docs/images/img2.png) |
+| Popover (dark) | ![Popover dark](docs/images/img-2.png) |
 | Popover (light) | ![Popover light](docs/images/img-3.png) |
 | Popover (light) | ![Popover light](docs/images/img-4.png) |
 
