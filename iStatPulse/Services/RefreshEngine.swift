@@ -21,7 +21,7 @@ protocol Refreshable: AnyObject {
 /// Exposes a Combine publisher for tick-driven pipelines.
 final class RefreshEngine: @unchecked Sendable {
     /// Default interval (seconds) when none specified.
-    static let defaultInterval: TimeInterval = 1.0
+    static let defaultInterval: TimeInterval = 10.0
 
     private let queue: DispatchQueue
     private var timer: DispatchSourceTimer?
