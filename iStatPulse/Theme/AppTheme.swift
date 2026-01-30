@@ -7,23 +7,46 @@
 //
 
 import SwiftUI
+import AppKit
 
 #if os(macOS)
 
 // MARK: - Base Palette (Dark Mode First)
 
 enum AppPalette {
-    static let cpuBlue       = Color(hex: "3DA9FC")
-    static let gpuCyan      = Color(hex: "2ED1C1")
-    static let memoryYellow = Color(hex: "F5C542")
-    static let diskPurple   = Color(hex: "9B6BFF")
-    static let networkPink  = Color(hex: "FF5DA2")
-    static let batteryGreen = Color(hex: "3DDC84")
-    static let warningOrange = Color(hex: "FF9F43")
-    static let criticalRed   = Color(hex: "FF453A")
-    static let neutralGray   = Color(hex: "8E8E93")
-    static let background   = Color(hex: "0E0E11")
-    static let panel        = Color(hex: "15151A")
+    static let cpuBlue        = Color(hex: "4C8DFF")
+    static let gpuCyan        = Color(hex: "2EE6FF")
+    static let memoryYellow   = Color(hex: "FFB84D")
+    static let diskPurple     = Color(hex: "9B7BFF")
+    static let networkPink    = Color(hex: "FF6FB7")
+    static let batteryGreen   = Color(hex: "5BE37D")
+    static let warningOrange  = Color(hex: "FF9F43")
+    static let criticalRed    = Color(hex: "FF453A")
+    static let neutralGray = dynamicColor(
+        light: NSColor(hex: "4B4F57"),
+        dark: NSColor(hex: "B7BCC4")
+    )
+    static let background = dynamicColor(
+        light: NSColor(hex: "FFFFFF"),
+        dark: NSColor(hex: "0A0C10")
+    )
+    static let panel = dynamicColor(
+        light: NSColor(hex: "F5F6F8"),
+        dark: NSColor(hex: "12161D")
+    )
+    static let panelSecondary = dynamicColor(
+        light: NSColor(hex: "E9ECF1"),
+        dark: NSColor(hex: "1A1F27")
+    )
+    static let panelStroke = dynamicColor(
+        light: NSColor(hex: "D5D9E0"),
+        dark: NSColor(hex: "2A3240")
+    )
+    private static func dynamicColor(light: NSColor, dark: NSColor) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
+        })
+    }
 }
 
 // MARK: - Threshold Level (Shared Hue Logic)
@@ -117,10 +140,10 @@ enum AppTheme {
     // MARK: - Gauge & Graph (iStat parity)
 
     /// Stroke thickness for circular gauges in metric rows (consistent across all rings).
-    static let metricGaugeLineWidth: CGFloat = 3
+    static let metricGaugeLineWidth: CGFloat = 4
     /// Mini graph line width and fill opacity.
-    static let metricGraphLineWidth: CGFloat = 1.5
-    static let metricGraphFillOpacity: Double = 0.12
+    static let metricGraphLineWidth: CGFloat = 2
+    static let metricGraphFillOpacity: Double = 0.18
 }
 
 // MARK: - Color Hex Helper
@@ -147,6 +170,31 @@ extension Color {
             green: Double(g) / 255,
             blue: Double(b) / 255,
             opacity: Double(a) / 255
+        )
+    }
+}
+
+extension NSColor {
+    convenience init(hex: String) {
+        let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        var int: UInt64 = 0
+        Scanner(string: hex).scanHexInt64(&int)
+        let a, r, g, b: UInt64
+        switch hex.count {
+        case 3: // RGB (12-bit)
+            (a, r, g, b) = (255, (int >> 8) * 17, (int >> 4 & 0xF) * 17, (int & 0xF) * 17)
+        case 6: // RGB (24-bit)
+            (a, r, g, b) = (255, int >> 16, int >> 8 & 0xFF, int & 0xFF)
+        case 8: // ARGB (32-bit)
+            (a, r, g, b) = (int >> 24, int >> 16 & 0xFF, int >> 8 & 0xFF, int & 0xFF)
+        default:
+            (a, r, g, b) = (255, 0, 0, 0)
+        }
+        self.init(
+            red: CGFloat(r) / 255,
+            green: CGFloat(g) / 255,
+            blue: CGFloat(b) / 255,
+            alpha: CGFloat(a) / 255
         )
     }
 }

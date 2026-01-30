@@ -11,37 +11,38 @@ import SwiftUI
 
 struct PopoverContentView: View {
     @StateObject private var viewModel = PopoverViewModel()
+    @AppStorage("appearanceMode") private var appearanceMode: String = "system"
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 14) {
                 header
                 if let metrics = viewModel.metrics {
-                    globalSummaryBar(metrics)
-                    heroSection(metrics)
-                    gpuSectionWithHeader(metrics.gpu)
-                    pressureMemoryBatteryGrid(metrics)
-                    peCoresRow(metrics.cpu)
-                    diskRow(metrics.disk)
-                    cpuSectionWithDualGraph(metrics.cpu)
+                    sectionCard { globalSummaryBar(metrics) }
+                    sectionCard { heroSection(metrics) }
+                    sectionCard { gpuSectionWithHeader(metrics.gpu) }
+                    sectionCard { pressureMemoryBatteryGrid(metrics) }
+                    sectionCard { peCoresRow(metrics.cpu) }
+                    sectionCard { diskRow(metrics.disk) }
+                    sectionCard { cpuSectionWithDualGraph(metrics.cpu) }
                     if let gpu = metrics.gpu {
-                        gpuRow(gpu, graphSamples: viewModel.sampleBuffers.gpu.samples)
+                        sectionCard { gpuRow(gpu, graphSamples: viewModel.sampleBuffers.gpu.samples) }
                     }
-                    diskIOSection(metrics.disk)
+                    sectionCard { diskIOSection(metrics.disk) }
                     if let network = metrics.network {
-                        networkSectionWithDualGraph(network)
+                        sectionCard { networkSectionWithDualGraph(network) }
                     }
                     if let network = metrics.network {
-                        pingBlock(network)
-                        publicIPBlock(network)
+                        sectionCard { pingBlock(network) }
+                        sectionCard { publicIPBlock(network) }
                     }
                     if let battery = metrics.battery {
-                        batteryBar(battery)
+                        sectionCard { batteryBar(battery) }
                     }
                     if let sensors = metrics.sensors, (!sensors.thermals.isEmpty || !sensors.fans.isEmpty) {
-                        sensorsRow(sensors)
+                        sectionCard { sensorsRow(sensors) }
                     }
-                    bottomNav
                 } else {
                     ProgressView("Loading…")
                         .frame(maxWidth: .infinity)
@@ -51,60 +52,69 @@ struct PopoverContentView: View {
             }
             .padding(20)
         }
-        .frame(width: 320, height: 560)
-        .background(AppPalette.panel)
+        .frame(width: 384, height: 784)
+        .background(AppPalette.background)
+        .environment(\.colorScheme, preferredColorScheme ?? colorScheme)
         .onAppear { viewModel.onAppear() }
         .onDisappear { viewModel.onDisappear() }
     }
 
     private var header: some View {
-        HStack {
-            Image(systemName: "chart.bar.doc.horizontal")
-                .font(.title2)
-                .foregroundStyle(AppPalette.neutralGray)
-            Text("iStat Pulse")
-                .font(.headline)
-                .foregroundStyle(.primary)
+        sectionCard {
+            HStack(spacing: 10) {
+                Image(systemName: "chart.bar.doc.horizontal")
+                    .font(.title2)
+                    .foregroundStyle(primaryTextColor)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("iStat Pulse")
+                        .font(.headline)
+                        .foregroundStyle(primaryTextColor)
+                    Text("System overview")
+                        .font(.caption2)
+                        .foregroundStyle(AppPalette.neutralGray)
+                }
+            }
         }
-        .padding(.bottom, 4)
     }
 
     /// Summary bar: memory used, FPS, free disk, ping, CPU %, network ↓/↑.
     private func globalSummaryBar(_ metrics: SystemMetrics) -> some View {
-        HStack(spacing: 8) {
-            Text("U \(viewModel.formattedBytes(metrics.memory.usedBytes))")
-                .font(.caption)
-                .foregroundStyle(AppPalette.neutralGray)
-            if let gpu = metrics.gpu, let fps = gpu.fps, fps > 0 {
-                Text("FPS \(Int(fps))")
-                    .font(.caption)
-                    .foregroundStyle(AppPalette.gpuCyan)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                summaryChip(icon: "memorychip", text: "\(viewModel.formattedBytes(metrics.memory.usedBytes)) used", color: AppPalette.memoryYellow)
+                summaryChip(
+                    icon: "internaldrive",
+                    text: "\(viewModel.formattedBytes(metrics.disk.totalBytes > metrics.disk.usedBytes ? metrics.disk.totalBytes - metrics.disk.usedBytes : 0)) free",
+                    color: AppPalette.diskPurple
+                )
+                summaryChip(icon: "cpu", text: "\(Int(metrics.cpu.usagePercent))% CPU", color: AppPalette.cpuBlue)
             }
-            Text("F \(viewModel.formattedBytes(metrics.disk.totalBytes > metrics.disk.usedBytes ? metrics.disk.totalBytes - metrics.disk.usedBytes : 0))")
-                .font(.caption)
-                .foregroundStyle(AppPalette.neutralGray)
-            if let net = metrics.network, let ping = net.pingMilliseconds, ping > 0 {
-                Text("\(Int(ping))ms")
-                    .font(.caption)
-                    .foregroundStyle(AppPalette.neutralGray)
+            HStack(spacing: 6) {
+                if let gpu = metrics.gpu, let fps = gpu.fps, fps > 0 {
+                    summaryChip(icon: "speedometer", text: "\(Int(fps)) FPS", color: AppPalette.gpuCyan)
+                }
+                if let net = metrics.network, let ping = net.pingMilliseconds, ping > 0 {
+                    summaryChip(icon: "dot.radiowaves.left.and.right", text: "\(Int(ping)) ms", color: AppPalette.neutralGray)
+                }
+                if let net = metrics.network {
+                    summaryChip(icon: "arrow.up", text: "\(viewModel.formattedBytes(net.sentBytesPerSecond))/s", color: AppPalette.networkPink)
+                    summaryChip(icon: "arrow.down", text: "\(viewModel.formattedBytes(net.receivedBytesPerSecond))/s", color: AppPalette.networkPink)
+                }
+                Spacer(minLength: 0)
             }
-            Text("CPU \(Int(metrics.cpu.usagePercent))%")
-                .font(.caption)
-                .foregroundStyle(AppPalette.cpuBlue)
-            if let net = metrics.network {
-                Text("\(viewModel.formattedBytes(net.sentBytesPerSecond))/s ↑")
-                    .font(.caption)
-                    .foregroundStyle(AppPalette.networkPink)
-                Text("\(viewModel.formattedBytes(net.receivedBytesPerSecond))/s ↓")
-                    .font(.caption)
-                    .foregroundStyle(AppPalette.networkPink)
-            }
-            Spacer(minLength: 0)
         }
-        .padding(.vertical, 6)
-        .padding(.horizontal, 10)
-        .background(AppPalette.neutralGray.opacity(0.12))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func summaryChip(icon: String, text: String, color: Color) -> some View {
+        Label(text, systemImage: icon)
+            .font(.caption2)
+            .foregroundStyle(color)
+            .lineLimit(1)
+            .minimumScaleFactor(0.85)
+            .padding(.vertical, 4)
+            .padding(.horizontal, 6)
+            .background(AppPalette.panelSecondary)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 
     /// Hero: three large circular gauges — CPU, GPU, FANS.
@@ -128,13 +138,19 @@ struct PopoverContentView: View {
             }
             fansHeroGauge(metrics.sensors)
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 6)
     }
 
     private func heroGauge(title: String, value: String, subtitle: String?, progress: Double, color: Color) -> some View {
         VStack(spacing: 4) {
-            CircularGauge(value: progress, accentColor: color, secondaryColor: color.opacity(0.5), lineWidth: 4, glowEnabled: true, glowRadius: 6, glowOpacity: 0.4)
-                .frame(width: 52, height: 52)
+            gaugeWithCenterText(
+                valueText: "\(Int(progress * 100))%",
+                progress: progress,
+                color: color,
+                size: 68,
+                lineWidth: 4,
+                glowEnabled: true
+            )
             Text(title)
                 .font(.caption2)
                 .foregroundStyle(AppPalette.neutralGray)
@@ -156,8 +172,14 @@ struct PopoverContentView: View {
         let progress = fansOn ? min(1, (sensors?.fans.first?.1 ?? 0) / 4000) : 0
         let color = AppPalette.neutralGray
         return VStack(spacing: 4) {
-            CircularGauge(value: progress, accentColor: color, secondaryColor: color.opacity(0.5), lineWidth: 4, glowEnabled: false, glowRadius: 0, glowOpacity: 0)
-                .frame(width: 52, height: 52)
+            gaugeWithCenterText(
+                valueText: fansOn ? "\(Int(sensors?.fans.first?.1 ?? 0))" : "OFF",
+                progress: progress,
+                color: color,
+                size: 68,
+                lineWidth: 4,
+                glowEnabled: false
+            )
             Text("FANS")
                 .font(.caption2)
                 .foregroundStyle(AppPalette.neutralGray)
@@ -198,11 +220,15 @@ struct PopoverContentView: View {
 
     private func smallGaugeCell(title: String, value: String, progress: Double, color: Color) -> some View {
         VStack(spacing: 2) {
-            CircularGauge(value: min(1, max(0, progress)), accentColor: color, secondaryColor: color.opacity(0.5), lineWidth: 2, glowEnabled: true, glowRadius: 2, glowOpacity: 0.3)
-                .frame(width: 36, height: 36)
-            Text(value)
-                .font(.caption2)
-                .foregroundStyle(color)
+            gaugeWithCenterText(
+                valueText: value,
+                progress: min(1, max(0, progress)),
+                color: color,
+                size: 44,
+                lineWidth: 2,
+                glowEnabled: true,
+                textColor: color
+            )
             Text(title)
                 .font(.caption2)
                 .foregroundStyle(AppPalette.neutralGray.opacity(0.8))
@@ -232,12 +258,15 @@ struct PopoverContentView: View {
 
     private func gridGauge(title: String, value: String, progress: Double, color: Color) -> some View {
         VStack(spacing: 4) {
-            CircularGauge(value: min(1, max(0, progress)), accentColor: color, secondaryColor: color.opacity(0.5), lineWidth: AppTheme.metricGaugeLineWidth, glowEnabled: true, glowRadius: 3, glowOpacity: 0.35)
-                .frame(width: 44, height: 44)
-            Text(value)
-                .font(.caption)
-                .fontWeight(.medium)
-                .foregroundStyle(color)
+            gaugeWithCenterText(
+                valueText: value,
+                progress: min(1, max(0, progress)),
+                color: color,
+                size: 54,
+                lineWidth: AppTheme.metricGaugeLineWidth,
+                glowEnabled: true,
+                textColor: color
+            )
             Text(title)
                 .font(.caption2)
                 .foregroundStyle(AppPalette.neutralGray.opacity(0.8))
@@ -298,8 +327,16 @@ struct PopoverContentView: View {
             Text("\(viewModel.formattedBytes(available)) available")
                 .font(.caption)
                 .foregroundStyle(AppPalette.neutralGray.opacity(0.9))
-            CircularGauge(value: disk.usagePercent / 100, accentColor: color, secondaryColor: color.opacity(0.5), lineWidth: AppTheme.metricGaugeLineWidth, glowEnabled: true, glowRadius: 3, glowOpacity: 0.35)
-                .frame(width: 24, height: 24)
+            gaugeWithCenterText(
+                valueText: "\(Int(disk.usagePercent))%",
+                progress: disk.usagePercent / 100,
+                color: color,
+                size: 32,
+                lineWidth: AppTheme.metricGaugeLineWidth,
+                glowEnabled: true,
+                textColor: color,
+                textScale: 0.6
+            )
         }
     }
 
@@ -322,11 +359,9 @@ struct PopoverContentView: View {
                     primarySamples: viewModel.sampleBuffers.cpuUser.samples,
                     secondarySamples: viewModel.sampleBuffers.cpuSystem.samples,
                     primaryColor: AppPalette.cpuBlue,
-                    secondaryColor: AppPalette.networkPink,
-                    lineWidth: AppTheme.metricGraphLineWidth,
-                    fillOpacity: AppTheme.metricGraphFillOpacity
+                    secondaryColor: AppPalette.networkPink
                 )
-                .frame(height: 22)
+                .frame(height: 30)
                 HStack(spacing: 12) {
                     HStack(spacing: 4) {
                         Circle().fill(AppPalette.cpuBlue).frame(width: 5, height: 5)
@@ -377,11 +412,9 @@ struct PopoverContentView: View {
                     primarySamples: viewModel.sampleBuffers.diskRead.samples,
                     secondarySamples: viewModel.sampleBuffers.diskWrite.samples,
                     primaryColor: AppPalette.networkPink,
-                    secondaryColor: AppPalette.cpuBlue,
-                    lineWidth: AppTheme.metricGraphLineWidth,
-                    fillOpacity: AppTheme.metricGraphFillOpacity
+                    secondaryColor: AppPalette.cpuBlue
                 )
-                .frame(height: 22)
+                .frame(height: 30)
             }
             HStack(spacing: 12) {
                 Text("Read \(viewModel.formattedBytes(disk.readBytesPerSecond))/s")
@@ -417,11 +450,9 @@ struct PopoverContentView: View {
                     primarySamples: viewModel.sampleBuffers.networkTx.samples,
                     secondarySamples: viewModel.sampleBuffers.networkRx.samples,
                     primaryColor: AppPalette.networkPink,
-                    secondaryColor: AppPalette.cpuBlue,
-                    lineWidth: AppTheme.metricGraphLineWidth,
-                    fillOpacity: AppTheme.metricGraphFillOpacity
+                    secondaryColor: AppPalette.cpuBlue
                 )
-                .frame(height: 22)
+                .frame(height: 30)
             }
         }
     }
@@ -431,23 +462,23 @@ struct PopoverContentView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text("PING")
                 .font(.caption2)
-                .foregroundStyle(AppPalette.neutralGray.opacity(0.8))
+                .foregroundStyle(AppPalette.neutralGray)
             HStack(spacing: 6) {
                 if let ping = network.pingMilliseconds, ping > 0 {
                     Circle().fill(AppPalette.batteryGreen).frame(width: 6, height: 6)
                 }
                 Text(network.pingHost ?? "—")
                     .font(.caption)
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(primaryTextColor)
                 if let ping = network.pingMilliseconds, ping > 0 {
                     Text("\(Int(ping))ms")
                         .font(.caption)
-                        .foregroundStyle(AppPalette.neutralGray)
+                        .foregroundStyle(primaryTextColor)
                 }
             }
         }
         .padding(8)
-        .background(AppPalette.neutralGray.opacity(0.08))
+        .background(AppPalette.panelSecondary)
         .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 
@@ -491,11 +522,9 @@ struct PopoverContentView: View {
                     }
                 }
                 .frame(height: 8)
-                if let t = timeStr {
-                    Text(battery.isCharging ? "\(t) until full" : "\(t) left")
-                        .font(.caption)
-                        .foregroundStyle(AppPalette.neutralGray)
-                }
+                Text(batteryTimeLabel(isCharging: battery.isCharging, percentage: battery.percentage, timeString: timeStr))
+                    .font(.caption)
+                    .foregroundStyle(AppPalette.neutralGray)
             }
         }
     }
@@ -516,35 +545,29 @@ struct PopoverContentView: View {
         )
     }
 
-    /// Bottom nav: 5 icons (reference style).
-    private var bottomNav: some View {
-        HStack(spacing: 16) {
-            Image(systemName: "bolt.fill")
-                .font(.body)
-                .foregroundStyle(AppPalette.neutralGray)
-            Image(systemName: "square.grid.2x2")
-                .font(.body)
-                .foregroundStyle(AppPalette.neutralGray)
-            Image(systemName: "play.fill")
-                .font(.caption)
-                .foregroundStyle(AppPalette.neutralGray)
-            Image(systemName: "gearshape.fill")
-                .font(.body)
-                .foregroundStyle(AppPalette.neutralGray)
-            Image(systemName: "antenna.radiowaves.left.and.right")
-                .font(.body)
-                .foregroundStyle(AppPalette.neutralGray)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 8)
-    }
-
     private var footer: some View {
         VStack(alignment: .leading, spacing: 8) {
             Divider()
-                .background(AppPalette.neutralGray.opacity(0.3))
+                .background(AppPalette.panelStroke)
+            HStack(spacing: 8) {
+                Image(systemName: "circle.lefthalf.filled")
+                    .font(.caption)
+                    .foregroundStyle(AppPalette.neutralGray)
+                Text("Appearance")
+                    .font(.caption)
+                    .foregroundStyle(AppPalette.neutralGray)
+                Spacer()
+                Picker("", selection: $appearanceMode) {
+                    Text("System").tag("system")
+                    Text("Dark").tag("dark")
+                    Text("Light").tag("light")
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 170)
+            }
             HStack {
-                Image(systemName: "power")
+                Image(systemName: "bolt.circle.fill")
                     .font(.caption)
                     .foregroundStyle(AppPalette.neutralGray)
                 Toggle("Launch at login", isOn: Binding(
@@ -566,6 +589,73 @@ struct PopoverContentView: View {
                 }
             }
         }
+    }
+
+    private var preferredColorScheme: ColorScheme? {
+        switch appearanceMode {
+        case "light":
+            return .light
+        case "dark":
+            return .dark
+        default:
+            return nil
+        }
+    }
+
+    private var primaryTextColor: Color {
+        preferredColorScheme == .dark || (preferredColorScheme == nil && colorScheme == .dark) ? .white : .primary
+    }
+
+    private func batteryTimeLabel(isCharging: Bool, percentage: Double, timeString: String?) -> String {
+        if isCharging {
+            if percentage >= 99 {
+                return "Full"
+            }
+            return timeString.map { "\($0) until full" } ?? "Charging"
+        }
+        return timeString.map { "\($0) left" } ?? "—"
+    }
+
+    private func gaugeWithCenterText(
+        valueText: String,
+        progress: Double,
+        color: Color,
+        size: CGFloat,
+        lineWidth: CGFloat,
+        glowEnabled: Bool,
+        textColor: Color? = nil,
+        textScale: CGFloat = 0.7
+    ) -> some View {
+        ZStack {
+            CircularGauge(
+                value: min(1, max(0, progress)),
+                accentColor: color,
+                secondaryColor: color.opacity(0.5),
+                lineWidth: lineWidth,
+                glowEnabled: glowEnabled,
+                glowRadius: glowEnabled ? 4 : 0,
+                glowOpacity: glowEnabled ? 0.35 : 0
+            )
+            Text(valueText)
+                .font(.caption2)
+                .fontWeight(.semibold)
+                .foregroundStyle(textColor ?? primaryTextColor)
+                .lineLimit(1)
+                .minimumScaleFactor(textScale)
+        }
+        .frame(width: size, height: size)
+    }
+
+    private func sectionCard<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        content()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+            .background(AppPalette.panel)
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(AppPalette.panelStroke, lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 
@@ -606,8 +696,8 @@ private struct MetricRow: View {
                     .frame(minWidth: 44, alignment: .trailing)
             }
             if !graphSamples.isEmpty {
-                MiniGraphView(samples: graphSamples, accentColor: accentColor, lineWidth: AppTheme.metricGraphLineWidth, fillOpacity: AppTheme.metricGraphFillOpacity)
-                    .frame(height: 22)
+                MiniGraphView(samples: graphSamples, accentColor: accentColor)
+                    .frame(height: 30)
             }
             Text(subtitle)
                 .font(.caption)

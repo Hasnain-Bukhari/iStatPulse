@@ -15,12 +15,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var debugWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        // Keep the app as a menu-bar accessory (no dock icon).
+        NSApp.setActivationPolicy(.accessory)
+
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        statusItem.isVisible = true
         guard let button = statusItem.button else { return }
 
         if let image = NSImage(systemSymbolName: "chart.bar.doc.horizontal", accessibilityDescription: "iStat Pulse") {
-            image.isTemplate = true
-            button.image = image
+            let config = NSImage.SymbolConfiguration(pointSize: 15, weight: .regular)
+            let sizedImage = image.withSymbolConfiguration(config) ?? image
+            sizedImage.isTemplate = true
+            button.image = sizedImage
+            button.imagePosition = .imageOnly
         } else {
             button.title = "iSP"
         }

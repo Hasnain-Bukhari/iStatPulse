@@ -12,16 +12,14 @@ import SwiftUI
 
 // MARK: - Mini Graph (Canvas)
 
-/// Real-time sparkline drawn with SwiftUI Canvas. Samples are 0...1 (normalized).
+/// Real-time bar graph drawn with SwiftUI Canvas. Samples are 0...1 (normalized).
 /// Low memory: pass a fixed-size array; Canvas is GPU-accelerated.
 struct MiniGraphView: View {
     /// Ordered samples oldest → newest; values in 0...1 (1 = top).
     var samples: [Double]
     var accentColor: Color = AppPalette.cpuBlue
-    /// Line width for the stroke.
-    var lineWidth: CGFloat = 1.5
-    /// Fill area under the line (opacity).
-    var fillOpacity: Double = 0.15
+    /// Bar spacing (points) between bars.
+    var barSpacing: CGFloat = 1
     /// Corner radius for optional rounded rect clip (0 = no clip).
     var cornerRadius: CGFloat = 2
 
@@ -32,38 +30,14 @@ struct MiniGraphView: View {
 
             let w = size.width
             let h = size.height
-            let stepX = (count > 1) ? w / CGFloat(count - 1) : w
-
-            // Path: (0,h) → (x0,y0) → … → (xLast,yLast) → (w,h) → close for fill
-            var fillPath = Path()
-            fillPath.move(to: CGPoint(x: 0, y: h))
-
-            var linePath = Path()
-            let y0 = h * (1 - CGFloat(min(1, max(0, samples[0]))))
-            linePath.move(to: CGPoint(x: 0, y: y0))
-
-            for i in 1..<count {
-                let x = CGFloat(i) * stepX
-                let y = h * (1 - CGFloat(min(1, max(0, samples[i]))))
-                fillPath.addLine(to: CGPoint(x: x, y: y))
-                linePath.addLine(to: CGPoint(x: x, y: y))
+            let barWidth = max(1, (w - (CGFloat(count - 1) * barSpacing)) / CGFloat(count))
+            for i in 0..<count {
+                let value = CGFloat(min(1, max(0, samples[i])))
+                let barHeight = h * value
+                let x = CGFloat(i) * (barWidth + barSpacing)
+                let rect = CGRect(x: x, y: h - barHeight, width: barWidth, height: barHeight)
+                context.fill(Path(roundedRect: rect, cornerRadius: 1), with: .color(accentColor))
             }
-            fillPath.addLine(to: CGPoint(x: w, y: h))
-            fillPath.closeSubpath()
-
-            // Fill under line
-            if fillOpacity > 0 {
-                context.fill(
-                    fillPath,
-                    with: .color(accentColor.opacity(fillOpacity))
-                )
-            }
-            // Stroke line (round cap/join for smooth look)
-            context.stroke(
-                linePath,
-                with: .color(accentColor),
-                style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round)
-            )
         }
         .drawingGroup() // Smooth left-to-right graph; reduces aliasing
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
@@ -72,14 +46,13 @@ struct MiniGraphView: View {
 
 // MARK: - Dual-Series Mini Graph (e.g. User/System, Read/Write, Upload/Download)
 
-/// Two series drawn with different colors; primary (e.g. user/read/upload) and secondary (system/write/download).
+/// Two series drawn as stacked bars; primary (e.g. user/read/upload) on top of secondary.
 struct DualSeriesMiniGraphView: View {
     var primarySamples: [Double]
     var secondarySamples: [Double]
     var primaryColor: Color = AppPalette.cpuBlue
     var secondaryColor: Color = AppPalette.networkPink
-    var lineWidth: CGFloat = 1.5
-    var fillOpacity: Double = 0.12
+    var barSpacing: CGFloat = 1
     var cornerRadius: CGFloat = 2
 
     var body: some View {
@@ -88,38 +61,31 @@ struct DualSeriesMiniGraphView: View {
             guard count > 1, size.width > 0, size.height > 0 else { return }
             let w = size.width
             let h = size.height
-            let stepX = w / CGFloat(count - 1)
+            let barWidth = max(1, (w - (CGFloat(count - 1) * barSpacing)) / CGFloat(count))
+            for i in 0..<count {
+                let primaryValue = i < primarySamples.count ? CGFloat(min(1, max(0, primarySamples[i]))) : 0
+                let secondaryValue = i < secondarySamples.count ? CGFloat(min(1, max(0, secondarySamples[i]))) : 0
+                let combined = min(1, primaryValue + secondaryValue)
+                let secondaryHeight = h * min(1, secondaryValue)
+                let primaryHeight = h * min(1, primaryValue)
+                let x = CGFloat(i) * (barWidth + barSpacing)
 
-            func path(for samples: [Double]) -> Path {
-                var p = Path()
-                guard !samples.isEmpty else { return p }
-                let y0 = h * (1 - CGFloat(min(1, max(0, samples[0]))))
-                p.move(to: CGPoint(x: 0, y: y0))
-                for i in 1..<samples.count {
-                    let x = CGFloat(i) * stepX
-                    let y = h * (1 - CGFloat(min(1, max(0, samples[i]))))
-                    p.addLine(to: CGPoint(x: x, y: y))
+                if secondaryHeight > 0 {
+                    let rect = CGRect(x: x, y: h - secondaryHeight, width: barWidth, height: secondaryHeight)
+                    context.fill(Path(roundedRect: rect, cornerRadius: 1), with: .color(secondaryColor))
                 }
-                return p
-            }
-
-            if primarySamples.count > 1 {
-                let fillPath = path(for: primarySamples)
-                var closed = fillPath
-                closed.addLine(to: CGPoint(x: CGFloat(primarySamples.count - 1) * stepX, y: h))
-                closed.addLine(to: CGPoint(x: 0, y: h))
-                closed.closeSubpath()
-                context.fill(closed, with: .color(primaryColor.opacity(fillOpacity)))
-                context.stroke(fillPath, with: .color(primaryColor), style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round))
-            }
-            if secondarySamples.count > 1 {
-                let fillPath = path(for: secondarySamples)
-                var closed = fillPath
-                closed.addLine(to: CGPoint(x: CGFloat(secondarySamples.count - 1) * stepX, y: h))
-                closed.addLine(to: CGPoint(x: 0, y: h))
-                closed.closeSubpath()
-                context.fill(closed, with: .color(secondaryColor.opacity(fillOpacity)))
-                context.stroke(fillPath, with: .color(secondaryColor), style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round))
+                if primaryHeight > 0 {
+                    let y = h - secondaryHeight - primaryHeight
+                    let rect = CGRect(x: x, y: max(0, y), width: barWidth, height: min(primaryHeight, h - secondaryHeight))
+                    context.fill(Path(roundedRect: rect, cornerRadius: 1), with: .color(primaryColor))
+                }
+                if combined < 1 {
+                    let gapY = h - (h * combined)
+                    if gapY > 0 {
+                        let rect = CGRect(x: x, y: 0, width: barWidth, height: gapY)
+                        context.fill(Path(rect), with: .color(.clear))
+                    }
+                }
             }
         }
         .drawingGroup()
