@@ -134,6 +134,13 @@ enum AppTheme {
         return .normal
     }
 
+    /// Battery percent: 0–20 critical (red), 21–40 warning (yellow), 41–100 normal (green).
+    static func thresholdLevel(batteryPercent: Double) -> ThresholdLevel {
+        if batteryPercent <= 20 { return .critical }
+        if batteryPercent <= 40 { return .warning }
+        return .normal
+    }
+
     /// Animation used when state/color changes.
     static let stateChangeAnimation: Animation = .easeInOut(duration: 0.35)
 

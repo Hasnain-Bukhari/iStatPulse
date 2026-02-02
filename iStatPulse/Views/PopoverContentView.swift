@@ -242,7 +242,7 @@ struct PopoverContentView: View {
         let pressureColor = AppTheme.semanticColor(metric: .memory, level: AppTheme.thresholdLevel(memoryPercent: mem.pressurePercent))
         let memoryColor = AppTheme.semanticColor(metric: .memory, level: AppTheme.thresholdLevel(memoryPercent: mem.usagePercent))
         let battery = metrics.battery
-        let batteryColor = battery.map { AppTheme.semanticColor(metric: .battery, level: AppTheme.thresholdLevel(cpuUsagePercent: $0.percentage)) } ?? AppPalette.neutralGray
+        let batteryColor = battery.map { AppTheme.semanticColor(metric: .battery, level: AppTheme.thresholdLevel(batteryPercent: $0.percentage)) } ?? AppPalette.neutralGray
         let healthPct = battery?.health.flatMap { _ in 100.0 } ?? 0
         return VStack(spacing: 8) {
             HStack(spacing: 8) {
@@ -504,7 +504,7 @@ struct PopoverContentView: View {
 
     /// Battery bar at bottom: horizontal progress + "X:XX until full" / "X:XX left".
     private func batteryBar(_ battery: BatteryMetrics) -> some View {
-        let color = AppTheme.semanticColor(metric: .battery, level: AppTheme.thresholdLevel(cpuUsagePercent: battery.percentage))
+        let color = AppTheme.semanticColor(metric: .battery, level: AppTheme.thresholdLevel(batteryPercent: battery.percentage))
         let timeStr = viewModel.batteryTimeRemainingString(minutes: battery.timeRemainingMinutes, charging: battery.isCharging)
         return VStack(alignment: .leading, spacing: 6) {
             Text("BATTERY")

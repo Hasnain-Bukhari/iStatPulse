@@ -162,6 +162,7 @@ final class SystemMetricsService: @unchecked Sendable, SystemMetricsServiceProto
         engine.start()
         fpsSampler.start()
         publicIPService.start()
+        networkService.startPingTimer()
     }
 
     /// Stop the engine and FPS sampler.
@@ -169,6 +170,7 @@ final class SystemMetricsService: @unchecked Sendable, SystemMetricsServiceProto
         engine.stop()
         fpsSampler.stop()
         publicIPService.stop()
+        networkService.stopPingTimer()
     }
 }
 

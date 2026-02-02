@@ -30,7 +30,7 @@ final class NetworkMetricsService: @unchecked Sendable, Refreshable {
 
     /// Ping target; nil disables ping.
     var pingHost: String? = "1.1.1.1"
-    var pingInterval: TimeInterval = 5.0
+    var pingInterval: TimeInterval = 10.0
     var pingTimeout: TimeInterval = 2.0
 
     var metricsPublisher: AnyPublisher<NetworkMetrics, Never> {
@@ -46,26 +46,35 @@ final class NetworkMetricsService: @unchecked Sendable, Refreshable {
             self?.sampleNetwork()
         }
         timer?.resume()
-        if let host = pingHost {
-            pingTimer = DispatchSource.makeTimerSource(queue: pingQueue)
-            pingTimer?.schedule(deadline: .now(), repeating: pingInterval)
-            pingTimer?.setEventHandler { [weak self] in
-                self?.samplePing(host: host)
-            }
-            pingTimer?.resume()
-        }
+        startPingTimer()
     }
 
     func stopPolling() {
         timer?.cancel()
         timer = nil
-        pingTimer?.cancel()
-        pingTimer = nil
+        stopPingTimer()
     }
 
     /// Called by RefreshEngine each tick (throughput only; ping uses its own timer when startPolling is used).
     func refresh() {
         sampleNetwork()
+        startPingTimer()
+    }
+
+    /// Starts ping timer only (used with RefreshEngine-driven polling).
+    func startPingTimer() {
+        guard pingTimer == nil, let host = pingHost else { return }
+        pingTimer = DispatchSource.makeTimerSource(queue: pingQueue)
+        pingTimer?.schedule(deadline: .now(), repeating: pingInterval)
+        pingTimer?.setEventHandler { [weak self] in
+            self?.samplePing(host: host)
+        }
+        pingTimer?.resume()
+    }
+
+    func stopPingTimer() {
+        pingTimer?.cancel()
+        pingTimer = nil
     }
 
     private func sampleNetwork() {
