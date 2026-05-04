@@ -30,7 +30,8 @@ final class NetworkMetricsService: @unchecked Sendable, Refreshable {
 
     /// Ping target; nil disables ping.
     var pingHost: String? = "1.1.1.1"
-    var pingInterval: TimeInterval = 10.0
+    /// Changed from 10.0 to 15.0 seconds to reduce network overhead.
+    var pingInterval: TimeInterval = 15.0
     var pingTimeout: TimeInterval = 2.0
 
     var metricsPublisher: AnyPublisher<NetworkMetrics, Never> {

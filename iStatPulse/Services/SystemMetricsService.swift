@@ -18,7 +18,7 @@ protocol SystemMetricsServiceProtocol: Sendable {
 }
 
 /// Aggregates CPU, Memory, Disk, GPU, Network, Battery, and Sensors services.
-/// Uses a single RefreshEngine (one timer, backpressure, dynamic interval).
+/// Uses dual RefreshEngines: fast (3s) for CPU/Memory/Network/GPU, slow (10s) for Battery/Sensors.
 final class SystemMetricsService: @unchecked Sendable, SystemMetricsServiceProtocol {
     private let cpuService: CPUMetricsService
     private let memoryService: MemoryMetricsService
@@ -30,7 +30,8 @@ final class SystemMetricsService: @unchecked Sendable, SystemMetricsServiceProto
     private let batteryService: BatteryMetricsService
     private let sensorsService: SMCSensorsService
 
-    private let engine: RefreshEngine
+    private let fastEngine: RefreshEngine  // For CPU, Memory, Network, GPU (3s)
+    private let slowEngine: RefreshEngine  // For Battery, Sensors (10s)
     private let subject = PassthroughSubject<SystemMetrics, Never>()
     private var cancellables = Set<AnyCancellable>()
     private let queue = DispatchQueue(label: "com.istatpulse.metrics", qos: .userInitiated)
@@ -39,10 +40,22 @@ final class SystemMetricsService: @unchecked Sendable, SystemMetricsServiceProto
         subject.eraseToAnyPublisher()
     }
 
-    /// Refresh interval in seconds; can be changed at runtime.
+    /// Fast refresh interval in seconds; can be changed at runtime.
+    var fastRefreshInterval: TimeInterval {
+        get { fastEngine.currentInterval }
+        set { fastEngine.setInterval(newValue) }
+    }
+    
+    /// Slow refresh interval in seconds; can be changed at runtime.
+    var slowRefreshInterval: TimeInterval {
+        get { slowEngine.currentInterval }
+        set { slowEngine.setInterval(newValue) }
+    }
+    
+    /// Legacy: maintains backward compatibility by setting fast interval.
     var refreshInterval: TimeInterval {
-        get { engine.currentInterval }
-        set { engine.setInterval(newValue) }
+        get { fastEngine.currentInterval }
+        set { fastEngine.setInterval(newValue) }
     }
 
     init(
@@ -66,10 +79,19 @@ final class SystemMetricsService: @unchecked Sendable, SystemMetricsServiceProto
         self.publicIPService = publicIPService
         self.batteryService = batteryService
         self.sensorsService = sensorsService
-        let refreshables: [Refreshable] = [cpuService, memoryService, diskService, gpuService, networkService, batteryService, sensorsService]
-        self.engine = RefreshEngine(interval: refreshInterval) {
-            refreshables.forEach { $0.refresh() }
+        
+        // Fast tier: CPU, Memory, Disk, GPU, Network (update every 3s for responsive UI)
+        let fastRefreshables: [Refreshable] = [cpuService, memoryService, diskService, gpuService, networkService]
+        self.fastEngine = RefreshEngine(interval: refreshInterval) {
+            fastRefreshables.forEach { $0.refresh() }
         }
+        
+        // Slow tier: Battery, Sensors (update every 10s, they change slowly)
+        let slowRefreshables: [Refreshable] = [batteryService, sensorsService]
+        self.slowEngine = RefreshEngine(interval: RefreshEngine.slowInterval) {
+            slowRefreshables.forEach { $0.refresh() }
+        }
+        
         combineLatest()
     }
 
@@ -157,17 +179,19 @@ final class SystemMetricsService: @unchecked Sendable, SystemMetricsServiceProto
         .store(in: &cancellables)
     }
 
-    /// Start the single refresh engine (and FPS sampler). Services are driven by engine ticks.
+    /// Start both refresh engines (fast + slow), FPS sampler, and network services.
     func startPolling() {
-        engine.start()
+        fastEngine.start()
+        slowEngine.start()
         fpsSampler.start()
         publicIPService.start()
         networkService.startPingTimer()
     }
 
-    /// Stop the engine and FPS sampler.
+    /// Stop both engines, FPS sampler, and network services.
     func stopPolling() {
-        engine.stop()
+        fastEngine.stop()
+        slowEngine.stop()
         fpsSampler.stop()
         publicIPService.stop()
         networkService.stopPingTimer()
